@@ -39,6 +39,7 @@ from teleop.utils.episode_writer import EpisodeWriter
 from teleop.utils.ipc import IPC_Server
 from teleop.utils.motion_switcher import MotionSwitcher, LocoClientWrapper
 from teleop.utils.hand_walk import HandWalkController
+from teleop.safety import SafetyShim
 from sshkeyboard import listen_keyboard, stop_listening
 
 # for simulation
@@ -48,6 +49,8 @@ def publish_reset_category(category: int, publisher): # Scene Reset signal
     msg = String_(data=str(category))
     publisher.Write(msg)
     logger_mp.info(f"published reset category: {category}")
+
+safety = None   # SafetyShim, constructed in __main__ after DDS init
 
 # state transition
 START          = False  # Enable to start robot following VR user motion
@@ -71,11 +74,15 @@ def on_press(key):
     global STOP, START, RECORD_TOGGLE
     if key == 'r':
         START = True
+        if safety is not None:
+            safety.notify_start()
     elif key == 'q':
         START = False
         STOP = True
     elif key == 's' and START == True:
         RECORD_TOGGLE = True
+    elif safety is not None and safety.on_press(key):
+        pass   # handled by the safety framework (p/x/e/u/b/h, decision answers)
     else:
         logger_mp.warning(f"[on_press] {key} was pressed, but no action is defined for this key.")
 
@@ -157,12 +164,19 @@ if __name__ == '__main__':
                                      arm_reference_mode="head_yaw"
                                      )
         
+        # Safety framework: built BEFORE any controller so a supervised damp path
+        # exists from the first energized moment. Press 'b' to stand (confirmed).
+        safety = SafetyShim(simulation_mode=args.sim, motion_mode=args.motion)
+        safety.start()
+
         # motion mode (G1: Regular mode R1+X, not Running mode R2+A)
         if args.motion:
             if args.input_mode in ("controller", "hand"):
                 # Hand mode also needs the loco client: the operator double-nods into WALK mode
                 # and steers with arm displacement (see the main loop + teleop.utils.hand_walk).
-                loco_wrapper = LocoClientWrapper()
+                # auto_stand=False: standing is a confirmed safety action now, not a launch
+                # side effect — press 'b' (EnterTeleopBalance runs the same verified 1->4->501).
+                loco_wrapper = LocoClientWrapper(auto_stand=False)
         else:
             motion_switcher = MotionSwitcher()
             status, result = motion_switcher.Enter_Debug_Mode()
@@ -360,6 +374,7 @@ if __name__ == '__main__':
 
             # get xr's tele data
             tele_data = tv_wrapper.get_tele_data()
+            sd = safety.update(tele_data, walk_mode=walk_mode) if safety is not None else None
             if args.ee in ("dex3", "inspire_ftp", "inspire_dfx", "brainco")  and args.input_mode == "hand":
                 # Don't track fingers while walking: the hands are steering, so hold their last
                 # pose (skip the update) instead of retargeting the steering motion into a grasp.
@@ -398,7 +413,11 @@ if __name__ == '__main__':
                 r_press = tele_data.right_ctrl_thumbstick
                 # command robot to enter damping mode. soft emergency stop function
                 if l_press and r_press:
-                    loco_wrapper.Enter_Damp_Mode()   # both sticks pressed = soft e-stop
+                    # both sticks pressed = soft e-stop (operator damp: always accepted, logged)
+                    if safety is not None:
+                        safety.user_damp("thumbsticks")
+                    else:
+                        loco_wrapper.Enter_Damp_Mode()
                 else:
                     # mode toggle (rising edges): right stick -> finger mode, left stick -> walk mode
                     if r_press and not prev_r_press:
@@ -413,9 +432,12 @@ if __name__ == '__main__':
                             START = False
                             STOP = True
                         # https://github.com/unitreerobotics/xr_teleoperate/issues/135, limit velocity to within 0.3
-                        loco_wrapper.Move(-tele_data.left_ctrl_thumbstickValue[1] * 0.3,
-                                          -tele_data.left_ctrl_thumbstickValue[0] * 0.3,
-                                          -tele_data.right_ctrl_thumbstickValue[0]* 0.3)
+                        _vx = -tele_data.left_ctrl_thumbstickValue[1] * 0.3
+                        _vy = -tele_data.left_ctrl_thumbstickValue[0] * 0.3
+                        _vyaw = -tele_data.right_ctrl_thumbstickValue[0] * 0.3
+                        if safety is not None:
+                            _vx, _vy, _vyaw = safety.filter_move(_vx, _vy, _vyaw)
+                        loco_wrapper.Move(_vx, _vy, _vyaw)
                 prev_l_press = l_press
                 prev_r_press = r_press
 
@@ -441,17 +463,20 @@ if __name__ == '__main__':
             # hand-mode high level control: double-nod toggles WALK <-> HAND-TRACK; in WALK,
             # arm displacement drives the legs with the same axis mapping as the thumbsticks.
             if args.input_mode == "hand" and args.motion:
-                if tele_data.motion_data_ready:
+                if tele_data.motion_data_ready and (sd is None or sd.walk_input_allowed):
                     hw = hand_walk.update(tv_wrapper.tvuer.head_pose,
                                           tele_data.left_wrist_pose, tele_data.right_wrist_pose,
                                           time.time())
                     if hw["toggled"]:
                         walk_mode = hw["walk_mode"]
                         logger_mp.info(f"[hand-walk] nod -> {'WALK (arms steer)' if walk_mode else 'HAND-TRACK (manipulate)'} mode")
-                    loco_wrapper.Move(hw["vx"], hw["vy"], hw["vyaw"])
+                    _vx, _vy, _vyaw = hw["vx"], hw["vy"], hw["vyaw"]
                 else:
-                    # No fresh XR tracking (e.g. headset removed/occluded): never keep walking.
-                    loco_wrapper.Move(0.0, 0.0, 0.0)
+                    # No fresh XR tracking, height mode active, or deadman held: never keep walking.
+                    _vx = _vy = _vyaw = 0.0
+                if safety is not None:
+                    _vx, _vy, _vyaw = safety.filter_move(_vx, _vy, _vyaw)
+                loco_wrapper.Move(_vx, _vy, _vyaw)
 
             # get current robot state data.
             current_lr_arm_q  = arm_ctrl.get_current_dual_arm_q()
@@ -466,6 +491,11 @@ if __name__ == '__main__':
                 # WALK mode: arms are the joystick -> hold them at the pose captured on entry
                 # instead of tracking, so steering motion doesn't make the robot arms flail.
                 arm_ctrl.ctrl_dual_arm(frozen_sol_q, frozen_sol_tauff)
+            elif sd is not None and not sd.arms_enabled:
+                # Safety hold (pause / height mode / deadman / stale XR / non-balancing):
+                # skip the call — the arm controller's internal publisher keeps streaming
+                # the last targets, so the arms hold pose. IK keeps solving for seamless resume.
+                pass
             else:
                 arm_ctrl.ctrl_dual_arm(sol_q, sol_tauff)
                 # keep the latest tracked pose as the freeze target for the next WALK toggle
@@ -633,6 +663,14 @@ if __name__ == '__main__':
         import traceback
         logger_mp.error(traceback.format_exc())
     finally:
+        try:
+            if safety is not None:
+                # descend to the safe pose and de-energize BEFORE parking the arms,
+                # so 'q', Ctrl-C and crashes never leave the robot balancing tall.
+                safety.controlled_shutdown()
+        except Exception as e:
+            logger_mp.error(f"Safety controlled shutdown failed: {e}")
+
         try:
             arm_ctrl.ctrl_dual_arm_go_home()
         except Exception as e:

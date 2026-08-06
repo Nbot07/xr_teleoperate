@@ -31,11 +31,15 @@ class MotionSwitcher:
             return None, None
 
 class LocoClientWrapper:
-    def __init__(self):
+    def __init__(self, auto_stand: bool = True):
         self.client = LocoClient()
         self.client.SetTimeout(1.0)     # generous timeout for the FSM handshake
         self.client.Init()
-        self._enter_control_mode()      # G1 sw 1.5.3: reach the walkable state via 1 -> 4 -> 501 (see below)
+        if auto_stand:
+            # G1 sw 1.5.3: reach the walkable state via 1 -> 4 -> 501 (see below).
+            # The safety framework passes auto_stand=False and runs the SAME verified
+            # sequence as a clearance-confirmed, pausable action instead ('b' key).
+            self._enter_control_mode()
         self.client.SetTimeout(0.0001)  # fast, non-blocking for the high-rate Move loop
 
     def _enter_control_mode(self):
