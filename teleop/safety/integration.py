@@ -42,6 +42,7 @@ Hands-only safety gesture (no keyboard, no controllers needed):
 """
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 
@@ -75,6 +76,7 @@ class SafetyShim:
         self._deadman_paused = False
         self._deadman_stopped = False
         self._n = 0
+        self._warned: dict[str, float] = {}
 
     # ------------------------------------------------------------- lifecycle
     def start(self) -> None:
@@ -155,14 +157,43 @@ class SafetyShim:
                               status=hd.status)
 
     # --------------------------------------------------------------- deadman
+    def _warn_every(self, key: str, period_s: float, now: float, msg: str) -> None:
+        """Rate-limited loud warning. The deadman must never fail quietly."""
+        last = self._warned.get(key, -1e9)
+        if now - last >= period_s:
+            self._warned[key] = now
+            self.supervisor.notifier.status(msg)
+
     def _tick_deadman(self, tele_data, now: float) -> bool:
-        """Both fists raised to head height: hold ≥2 s → pause, ≥4 s → safe stop."""
+        """Both fists raised to head height: hold ≥2 s → pause, ≥4 s → safe stop.
+
+        Every way this gesture can be unavailable is announced. A silently
+        disabled e-stop is worse than no e-stop, because the operator is
+        relying on it.
+        """
         g = self.cfg.gesture
         a = self.supervisor.authority
         L, R = self.height.left, self.height.right
-        raised = self._both_raised(tele_data, g.deadman_raise_below_head_m)
-        both = L.fist and R.fist and raised and not (L.stale(now) or R.stale(now))
-        dur = min(L.fist_duration(now), R.fist_duration(now)) if both else 0.0
+        dm_stale = getattr(g, "deadman_stale_s", g.tracking_stale_exit_s)
+
+        raised, readable = self._both_raised(tele_data, g.deadman_raise_below_head_m)
+        if not readable:
+            self._warn_every(
+                "dm_head", 5.0, now,
+                "⚠ DEADMAN UNAVAILABLE: head pose unreadable, raised-fists safe stop "
+                "will NOT fire. Use 'x' (safe stop), 'e','e' (damp), or the RC.")
+
+        fists_up = L.fist and R.fist and raised
+        stale = L.stale(now, dm_stale) or R.stale(now, dm_stale)
+        if fists_up and stale:
+            self._warn_every(
+                "dm_stale", 5.0, now,
+                f"⚠ DEADMAN SUPPRESSED: hand tracking frozen >{dm_stale:.0f}s while both "
+                "fists held. Gesture will NOT fire — use 'x' or the RC.")
+
+        both = fists_up and not stale
+        dur = min(L.fist_duration(now, dm_stale),
+                  R.fist_duration(now, dm_stale)) if both else 0.0
 
         if both and dur >= g.both_fist_stop_s:
             if not self._deadman_stopped:
@@ -184,11 +215,19 @@ class SafetyShim:
         return both and dur >= g.both_fist_pause_s
 
     @staticmethod
-    def _both_raised(tele_data, below_head_m: float) -> bool:
+    def _both_raised(tele_data, below_head_m: float):
+        """Returns (raised, readable).
+
+        `readable` is False when the poses cannot be evaluated at all. The
+        caller announces that case rather than treating it as "not raised" --
+        otherwise an unreadable head pose disables the e-stop in silence.
+        """
         try:
             hz = float(tele_data.head_pose[2, 3])
             lz = float(tele_data.left_wrist_pose[2, 3])
             rz = float(tele_data.right_wrist_pose[2, 3])
         except Exception:  # noqa: BLE001
-            return False
-        return lz > hz - below_head_m and rz > hz - below_head_m
+            return False, False
+        if not all(map(math.isfinite, (hz, lz, rz))):
+            return False, False
+        return (lz > hz - below_head_m and rz > hz - below_head_m), True

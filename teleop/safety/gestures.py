@@ -60,18 +60,32 @@ class HandGestureTracker:
                 self._fired = False
 
     # --------------------------------------------------------------- queries
-    def stale(self, now: float | None = None) -> bool:
+    def since_change(self, now: float | None = None) -> float:
+        """Seconds since the landmarks last actually moved (inf if never seen)."""
         now = now if now is not None else time.monotonic()
-        return self._last_pos is None or (now - self._last_change_t) > self._stale_s
+        if self._last_pos is None:
+            return float("inf")
+        return now - self._last_change_t
+
+    def stale(self, now: float | None = None, stale_s: float | None = None) -> bool:
+        """Data unchanged for longer than the staleness budget.
+
+        `stale_s` overrides the tracker default. The deadman passes its own,
+        longer budget: genuinely frozen tracking is the *supervisor's* XR
+        staleness ladder to handle (freeze -> countdown -> safe squat), so the
+        deadman only needs to reject data that is very stale, not merely still.
+        """
+        return self.since_change(now) > (self._stale_s if stale_s is None else stale_s)
 
     @property
     def fist(self) -> bool:
         return self._fist
 
-    def fist_duration(self, now: float | None = None) -> float:
-        """Seconds the current fist has been held (0.0 if not a fist)."""
+    def fist_duration(self, now: float | None = None,
+                      stale_s: float | None = None) -> float:
+        """Seconds the current fist has been held (0.0 if not a fist / stale)."""
         now = now if now is not None else time.monotonic()
-        if self._fist and self._fist_since is not None and not self.stale(now):
+        if self._fist and self._fist_since is not None and not self.stale(now, stale_s):
             return now - self._fist_since
         return 0.0
 

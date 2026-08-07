@@ -100,6 +100,14 @@ class GestureConfig:
     # The deadman only counts with both fists RAISED near head height, so a
     # two-handed carry at torso height can never false-trigger it:
     deadman_raise_below_head_m: float = 0.25
+    # Staleness budget for the deadman ONLY. Deliberately larger than
+    # both_fist_stop_s: tracking_stale_exit_s (2.0) is equal to
+    # both_fist_pause_s, so sharing it puts the staleness timeout exactly on
+    # the pause threshold -- a hold that is very still (or a headset that
+    # quantises its output) could then be suppressed at the moment it should
+    # fire. Frozen tracking is already covered by the supervisor's XR
+    # staleness ladder; this budget only rejects data that is truly dead.
+    deadman_stale_s: float = 5.0
 
 
 @dataclass
