@@ -250,6 +250,32 @@ ladder as risk *reduction*, not risk *elimination*.
 1. **Sim first:** run the framework against `unitree_mujoco` / your Isaac
    `--sim` path (DDS domain 1). Verify: gesture toggling, slewed height,
    ladder timing with a mocked BMS, pause/abort at every phase of every action.
+
+   > ⚠️ **What a mujoco pass can and cannot cover.** `unitree_mujoco` bridges
+   > low-level DDS only — its README states it "only supports low-level
+   > development", and it publishes `LowCmd`/`LowState`/`SportModeState`/
+   > `IMUState` with **no `LocoClient` services**. Independently, this
+   > framework sets `_loco = None` whenever `simulation_mode=True`. So a sim
+   > pass validates DDS plumbing, arm/IK, loop integration, key routing and
+   > gesture arbitration — but **executes no FSM transition, no
+   > `SetStandHeight`, and no damp**. Every action that commands the robot is
+   > covered instead by `teleop/safety/tests/test_scenarios.py`, which drives
+   > them against a recording fake client and asserts command *order*.
+   >
+   > Two practical notes from running this (Ubuntu 20.04 under WSL2):
+   > `mujoco.viewer.launch_passive` hangs under WSLg, and `unitree_mujoco.py`
+   > gates its whole loop on `while viewer.is_running():` — so nothing is ever
+   > published. Model loading and physics are fine headless, so run the bridge
+   > without a viewer. And DDS discovery between two local processes needs a
+   > `<Peer address="localhost"/>`: `lo` is not multicast-capable, and on this
+   > WSL setup even locally-originated multicast is not delivered back.
+
+   Verified this way (11/11): teleop reaches the main loop against the
+   simulator, the arm controller subscribes to simulated lowstate, the
+   supervisor comes online announcing `FSM table UNVERIFIED`, and
+   `r`/`p`/`h`/`e`/`x`/`q` all route through the real `sshkeyboard` path —
+   including `e` arming rather than executing on a single press, and `q`
+   running the controlled de-energize.
 2. **Probe on hardware, robot on a mat, lying down:** `python tools/fsm_probe.py
    --network-interface <if>`. It walks candidate FSM ids one at a time with
    typed confirmation, records posture before/after from the estimator, sweeps
