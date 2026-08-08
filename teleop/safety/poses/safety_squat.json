@@ -1,0 +1,42 @@
+{
+  "meta": {
+    "name": "safety_squat",
+    "units": "radians"
+  },
+  "joints": {
+    "left_hip_pitch": -2.5260865688323975,
+    "left_hip_roll": 0.1023574247956276,
+    "left_hip_yaw": -0.0068566505797207355,
+    "left_knee": 2.8988146781921387,
+    "left_ankle_pitch": -0.8709471225738525,
+    "left_ankle_roll": 0.010618171654641628,
+    "right_hip_pitch": -2.527921199798584,
+    "right_hip_roll": -0.05788731947541237,
+    "right_hip_yaw": -0.004727339372038841,
+    "right_knee": 2.9106006622314453,
+    "right_ankle_pitch": -0.8689313530921936,
+    "right_ankle_roll": -0.01352569181472063,
+    "waist_yaw": 0.020717263221740723,
+    "waist_roll": -0.03460829518735409,
+    "waist_pitch": 0.49867650866508484,
+    "left_shoulder_pitch": -0.1843593269586563,
+    "left_shoulder_roll": 0.4817677140235901,
+    "left_shoulder_yaw": -0.9976028800010681,
+    "left_elbow": 0.6957442164421082,
+    "left_wrist_roll": -0.713768482208252,
+    "left_wrist_pitch": -1.58920419216156,
+    "left_wrist_yaw": 0.3649340569972992,
+    "right_shoulder_pitch": -0.31287217140197754,
+    "right_shoulder_roll": -0.5217351317405701,
+    "right_shoulder_yaw": 1.0052368640899658,
+    "right_elbow": 0.7412243485450745,
+    "right_wrist_roll": -0.3938196301460266,
+    "right_wrist_pitch": -1.3173367977142334,
+    "right_wrist_yaw": -1.4573968648910522
+  },
+  "imu_rpy": [
+    0.008882596157491207,
+    0.5234839916229248,
+    -0.4095827639102936
+  ]
+}

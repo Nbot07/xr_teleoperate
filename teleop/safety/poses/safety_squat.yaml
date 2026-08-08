@@ -1,0 +1,48 @@
+# safety_squat — captured from the robot on 2026-08-08 10:08:51
+#
+# Angles are DEGREES so you can reason about them while looking at the robot.
+# Edit ONE line to nudge ONE joint; everything else holds its captured value.
+# Re-run tools/capture_pose.py to re-measure from a hand-posed robot.
+#
+# IMU at capture: roll=+0.51 pitch=+29.99 yaw=-23.47
+# encoder noise: max 0.005° over 60 frames
+
+meta:
+  name: safety_squat
+  captured_utc: 2026-08-08T14:08:51Z
+  units: degrees
+  source: measured from a hand-posed robot (motors compliant)
+
+joints:
+  # ---- legs ----
+  left_hip_pitch:          -144.73
+  left_hip_roll:              5.86
+  left_hip_yaw:              -0.39
+  left_knee:                166.09
+  left_ankle_pitch:         -49.90
+  left_ankle_roll:            0.61
+  right_hip_pitch:         -144.84
+  right_hip_roll:            -3.32
+  right_hip_yaw:             -0.27
+  right_knee:               166.77
+  right_ankle_pitch:        -49.79
+  right_ankle_roll:          -0.77
+  # ---- waist ----
+  waist_yaw:                  1.19
+  waist_roll:                -1.98
+  waist_pitch:               28.57
+  # ---- arms ----
+  left_shoulder_pitch:      -10.56
+  left_shoulder_roll:        27.60
+  left_shoulder_yaw:        -57.16
+  left_elbow:                39.86
+  left_wrist_roll:          -40.90
+  left_wrist_pitch:         -91.05
+  left_wrist_yaw:            20.91
+  right_shoulder_pitch:     -17.93
+  right_shoulder_roll:      -29.89
+  right_shoulder_yaw:        57.60
+  right_elbow:               42.47
+  right_wrist_roll:         -22.56
+  right_wrist_pitch:        -75.48
+  right_wrist_yaw:          -83.50
