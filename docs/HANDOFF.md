@@ -108,12 +108,55 @@ single joint can be nudged without disturbing the rest).
 **Two caveats:**
 
 1. **The hands-down contact is incidental, not structural** — stability comes
-   from feet + shins/knees. So the arms can be pinned to a fixed pose and left
-   out of the action space. The saved file has the hands down, so **its arm
-   angles are not the training target**. Re-pose the arms tucked/at-sides,
-   confirm the kneel still holds, and re-capture before training.
+   from feet + shins/knees. The arms still have to *finish* in this pose, but
+   they carry no load, so they can follow a deterministic trajectory and stay
+   out of the policy's action space. That keeps it at **legs + `waist_pitch`,
+   ~13 DoF**, and makes self-collision an offline geometry problem rather than a
+   reward term. The policy still has to reject the inertial disturbance the arm
+   motion causes, so the arm trajectory should be deterministic and observable.
 2. **The pose does not hold its shape when hoisted** — it needs ground contact.
    It cannot be commanded in mid-air without low-level control.
+
+### Self-collision: only the hands matter
+
+Arms may touch the chest and the legs fold onto each other — a deep kneel puts
+calf on thigh, which is real contact, not a modelling error. The only collision
+worth preventing is one that could damage the hands.
+
+`tools/check_self_collision.py` checks a pose, or a joint-space path between two
+poses, and reports hand contacts by body pair with penetration depth.
+
+**Result on the captured pose:** only `left_hand_thumb_1/2` touch `left_knee`,
+by **2.7 mm and 1.0 mm**. Right hand clear. Minimum single-joint fixes:
+
+| joint | change that clears it |
+| :-- | --: |
+| `left_shoulder_pitch` | **−1.0°** |
+| `left_shoulder_yaw` | +2.0° |
+| `left_wrist_roll` | −2.5° |
+| `left_wrist_pitch` | +2.5° |
+
+2.7 mm is at the edge of what mesh approximations resolve, and in the photos the
+hands rest on the mat *beside* the knees — so this may be an artifact. Clear it
+because it is nearly free, not because the pose needs redesigning.
+
+**Two traps, both of which produced confidently wrong answers first:**
+
+* **`unitree_mujoco`'s G1 scene has NO hands.** Its chain ends at
+  `wrist_yaw_link`. It reports 11–30 mm "knee ↔ wrist" penetrations that are the
+  wrist *stub*, while the actual Inspire hands are invisible to it. Use
+  **`assets/g1/g1_body29_hand14.xml`** — in this repo, already used by
+  `robot_arm_ik.py`, with real fingers (14 hand bodies, 43 actuators).
+* **That model interleaves the finger joints**: left hand at `qpos` 29–35, right
+  at 43–49, *after* each arm rather than appended. Positional indexing silently
+  writes arm values into finger joints. **Map by joint name.**
+
+The checker self-tests by forcing a known-colliding pose and refuses to report
+if that produces no contacts, because many robot models exclude self-collision
+pairs and would make every pose look clean. Worth keeping: the first probe used
+a *positive* shoulder-roll, which abducts the arm away from the torso and hits
+nothing, yielding a false "self-collision is disabled" verdict. Negative left
+shoulder-roll adducts.
 
 ---
 
@@ -136,6 +179,22 @@ terminal pose rather than a commanded velocity.
 Because the hands are incidental, this is a **modest extension of the existing
 env**, not a whole-body arm-loaded push-off. That was the single largest scoping
 question and it resolved favourably.
+
+Concrete implications for the env:
+
+* **Action space:** the 12 leg joints plus `waist_pitch`. Arms follow a scripted
+  trajectory to the target pose; put its phase in the observation so the policy
+  can anticipate the inertial disturbance rather than only reacting to it.
+* **Contact schedule:** shins lift off as the robot rises. Simpler than a
+  hands-releasing schedule, but still a contact change the reward must handle.
+* **Terminal pose, not commanded velocity.** The shipped config rewards tracking
+  a velocity command; this task rewards arriving at and holding a specific joint
+  configuration. Expect to replace most of `rewards.scales`.
+* **Collision penalties must not fight the pose.** Calf-on-thigh and arm-on-chest
+  are wanted. Penalise hand contacts only — the same filter
+  `tools/check_self_collision.py` applies.
+* **Validate the arm trajectory offline** with `--from`/`--to` before training,
+  so the policy never has to learn around a path that damages the hands.
 
 ---
 
